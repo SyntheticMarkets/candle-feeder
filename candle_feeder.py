@@ -8,6 +8,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pyquotex.stable_api import Quotex
+import builtins
+builtins.print = lambda *args, **kwargs: None
+
 
 candles = {}
 assets_to_track = []
