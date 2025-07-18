@@ -1,5 +1,6 @@
 import asyncio
 import time
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -70,7 +71,10 @@ async def filter_available_assets(client, min_payout=70):
 async def fetch_and_feed():
     global assets_to_track
 
-    client = Quotex()
+    client = Quotex(
+        email=os.getenv("QX_EMAIL"),
+        password=os.getenv("QX_PASSWORD")
+    )
     await client.connect()
     await client.change_account("demo")
     print("✅ Connected to Quotex")
