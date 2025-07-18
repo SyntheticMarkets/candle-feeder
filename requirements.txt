@@ -1,4 +1,4 @@
 fastapi
 uvicorn
-pydantic
-starlette
+pyquotex @ git+https://github.com/Jacques0106/pyquotex.git
+urllib3
