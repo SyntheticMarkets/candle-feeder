@@ -6,6 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pyquotex.stable_api import Quotex
 
+logging.getLogger().setLevel(logging.CRITICAL)  # 🔇 Disable all logging output from libraries
+
 candles = {}
 assets_to_track = []
 
