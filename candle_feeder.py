@@ -111,7 +111,7 @@ async def fetch_and_feed():
                         })
                   #  print(f"✅ Saved {len(candles_raw)} candles for {asset}")
                 else:
-                    print(f"⚠️ No candles returned for {asset}")
+                  #  print(f"⚠️ No candles returned for {asset}")
             except Exception as e:
                 print(f"[ERROR] Candle fetch failed for {asset}: {e}")
         await asyncio.sleep(1)
