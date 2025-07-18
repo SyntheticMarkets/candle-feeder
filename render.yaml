@@ -1,0 +1,8 @@
+services:
+  - type: web
+    name: candle-feeder
+    env: python
+    buildCommand: |
+      pip install urllib3
+      pip install -r requirements.txt
+    startCommand: "uvicorn candle_feeder:app --host=0.0.0.0 --port=10000"
