@@ -70,7 +70,17 @@ async def filter_available_assets(client, min_payout=70):
 async def fetch_and_feed():
     global assets_to_track
 
-    client = Quotex()
+    # ✅ Load token-based session
+    import json
+    with open("session.json", "r") as f:
+        session = json.load(f)
+
+    client = Quotex(
+        token=session["token"],
+        cookies=session["cookies"],
+        user_agent=session["user_agent"]
+    )
+
     await client.connect()
     await client.change_account("demo")
     print("✅ Connected to Quotex")
