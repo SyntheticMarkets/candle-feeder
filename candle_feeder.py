@@ -113,7 +113,7 @@ async def fetch_and_feed():
                 else:
                  pass  # previously: print(f"⚠️ No candles returned for {asset}")
             except Exception as e:
-                print(f"[ERROR] Candle fetch failed for {asset}: {e}")
+             pass  # muted fetch error
         await asyncio.sleep(1)
 
 @app.on_event("startup")
