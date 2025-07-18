@@ -4,3 +4,4 @@ fastapi
 uvicorn
 urllib3
 numpy
+websocket-client
