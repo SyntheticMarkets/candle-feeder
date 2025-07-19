@@ -59,7 +59,7 @@ async def filter_available_assets(client, min_payout=70):
                 asset_status = await client.get_available_asset(name, force_open=True)
                 is_open = asset_status[1][2] if isinstance(asset_status, tuple) and isinstance(asset_status[1], tuple) else False
 
-               # print(f"🔎 Checking {name} | Open: {is_open} | 1M Payout: {payout_info}")
+                print(f"🔎 Checking {name} | Open: {is_open} | 1M Payout: {payout_info}")
 
                 if is_open and int(payout_info) >= min_payout:
                     valid_assets.append(name)
@@ -70,7 +70,7 @@ async def filter_available_assets(client, min_payout=70):
 
     except Exception as e:
         print(f"[ERROR] Filtering assets: {e}")
-   # print(f"✅ Valid assets after filter: {valid_assets}")
+    print(f"✅ Valid assets after filter: {valid_assets}")
     return valid_assets
 
 # ✅ Background fetch logic
@@ -97,14 +97,14 @@ async def fetch_and_feed():
 
     # ⏳ Wait until valid assets are available
     while not assets_to_track:
-      #  print("⏳ Waiting for valid assets to track...")
+        print("⏳ Waiting for valid assets to track...")
         await asyncio.sleep(1)
 
     # 🔄 Candle fetching
     while True:
         for asset in assets_to_track:
             try:
-               # print(f"⏳ Fetching candles for {asset}...")
+                print(f"⏳ Fetching candles for {asset}...")
                 candles_raw = await client.get_candles(asset, 1, 15, 60)  # Fetch 15 candles
                 if candles_raw:
                     for candle in candles_raw:
@@ -115,7 +115,7 @@ async def fetch_and_feed():
                             "close": float(candle["close"]),
                             "time": time.time()
                         })
-                  #  print(f"✅ Saved {len(candles_raw)} candles for {asset}")
+                    print(f"✅ Saved {len(candles_raw)} candles for {asset}")
                 else:
                  pass  # previously: print(f"⚠️ No candles returned for {asset}")
             except Exception as e:
