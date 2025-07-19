@@ -15,7 +15,7 @@ original_print = builtins.print
 def smart_print(*args, **kwargs):
     frame = inspect.currentframe().f_back
     filename = frame.f_globals.get("__file__", "")
-    if "candle_feeder_currencies.py" in filename:
+    if "monitoring_assets.py" in filename:
         original_print(*args, **kwargs)
 builtins.print = smart_print
 logging.basicConfig(level=logging.CRITICAL + 1)
@@ -101,9 +101,8 @@ async def bot_loop(client):
             log(f"✅ Refreshed tracked assets: {assets_store['track']}")
             await asyncio.sleep(1)
         await asyncio.sleep(0.5)
-        
-        
-# === FASTAPI APP ===
+
+# === FASTAPI SETUP ===
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
@@ -112,22 +111,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# === SAFE LOGIN + START ===
-async def start_bot():
-    await asyncio.sleep(3)  # ✅ Give network stack time to settle (especially on Render)
+@app.on_event("startup")
+async def startup_event():
     client = Quotex(
-    email = os.getenv("QX_EMAIL")
-    password = os.getenv("QX_PASSWORD")
+        email=os.getenv("QX_EMAIL"),
+        password=os.getenv("QX_PASSWORD")
     )
     await client.connect()
     await client.change_account("demo")
     print("✅ Connected to Quotex")
-
-
-
-@app.on_event("startup")
-async def startup_event():
-    asyncio.create_task(start_bot())
+    asyncio.create_task(bot_loop(client))
 
 @app.get("/candles/{symbol}")
 def get_candle(symbol: str):
