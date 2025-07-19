@@ -7,9 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi import Request
-from contextlib import asynccontextmanager
 import os
-#from pyquotex.config import credentials
 from pyquotex.stable_api import Quotex
 from pyquotex.utils.processor import process_candles
 
@@ -18,7 +16,7 @@ original_print = builtins.print
 def smart_print(*args, **kwargs):
     frame = inspect.currentframe().f_back
     filename = frame.f_globals.get("__file__", "")
-    if "monitoring_assets.py" in filename:
+    if "candle_feeder_currencies.py" in filename:
         original_print(*args, **kwargs)
 builtins.print = smart_print
 logging.basicConfig(level=logging.CRITICAL + 1)
@@ -105,9 +103,17 @@ async def bot_loop(client):
             await asyncio.sleep(1)
         await asyncio.sleep(0.5)
 
-# === FASTAPI SETUP WITH LIFESPAN ===
-@asynccontextmanager
-async def lifespan(app: FastAPI):
+# === FASTAPI SETUP ===
+app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.on_event("startup")
+async def startup_event():
     email = os.getenv("QX_EMAIL")
     password = os.getenv("QX_PASSWORD")
     client = Quotex(email=email, password=password, lang="en")
@@ -115,21 +121,10 @@ async def lifespan(app: FastAPI):
     check, msg = await client.connect()
     log(f"🔌 Login success: {check} | {msg}")
     if not check:
-        yield
+        log("❌ Login failed. Bot will not start.")
         return
     await client.change_account("demo")
-    app.state.bot_task = asyncio.create_task(bot_loop(client))
-    yield
-    await client.close()
-
-
-app = FastAPI(lifespan=lifespan)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+    asyncio.create_task(bot_loop(client))
 
 @app.get("/candles/{symbol}")
 def get_candle(symbol: str):
