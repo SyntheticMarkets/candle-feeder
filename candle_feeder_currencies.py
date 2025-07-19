@@ -6,7 +6,6 @@ import inspect
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi import Request
 import os
 from pyquotex.stable_api import Quotex
 from pyquotex.utils.processor import process_candles
@@ -103,17 +102,9 @@ async def bot_loop(client):
             await asyncio.sleep(1)
         await asyncio.sleep(0.5)
 
-# === FASTAPI SETUP ===
-app = FastAPI()
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-@app.on_event("startup")
-async def startup_event():
+# === SAFE LOGIN + START ===
+async def start_bot():
+    await asyncio.sleep(3)  # ✅ Give network stack time to settle (especially on Render)
     email = os.getenv("QX_EMAIL")
     password = os.getenv("QX_PASSWORD")
     client = Quotex(email=email, password=password, lang="en")
@@ -125,6 +116,19 @@ async def startup_event():
         return
     await client.change_account("demo")
     asyncio.create_task(bot_loop(client))
+
+# === FASTAPI APP ===
+app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(start_bot())
 
 @app.get("/candles/{symbol}")
 def get_candle(symbol: str):
