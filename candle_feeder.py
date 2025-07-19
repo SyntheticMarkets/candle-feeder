@@ -1,5 +1,5 @@
 import logging
-#logging.getLogger().setLevel(logging.CRITICAL)  # 🔇 Disable all logging output from libraries
+logging.getLogger().setLevel(logging.CRITICAL)  # 🔇 Still silences external logs
 
 import asyncio
 import time
@@ -8,9 +8,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pyquotex.stable_api import Quotex
-import builtins
-#builtins.print = lambda *args, **kwargs: None
-
+# Comment out forced print override
+# import builtins
+# builtins.print = lambda *args, **kwargs: None
 
 candles = {}
 assets_to_track = []
@@ -36,40 +36,39 @@ app.add_middleware(
 @app.get("/candles/{symbol}")
 def get_candle_data(symbol: str):
     result = get_candles(symbol)
-  #  print(f"📤 Served {symbol} candles: {len(result)}")
+    print(f"📤 Served {symbol} candles: {len(result)}")
     return JSONResponse(content=result)
 
 @app.get("/tracked-assets")
 def tracked_assets():
+    print(f"📡 Reporting {len(assets_to_track)} tracked assets...")
     return JSONResponse(content=assets_to_track)
 
 # ✅ Filter only open instruments with 70%+ payout
 async def filter_available_assets(client, min_payout=70):
     valid_assets = []
     try:
-        asset_names = client.get_all_asset_name()
+        asset_names = await client.get_all_assets()  # dict of { 'EURUSD_otc': {...}, ... }
         payouts = client.get_payment()
 
-        for asset_pair in asset_names:
+        for name in asset_names.keys():
             try:
-                name = asset_pair[0] if isinstance(asset_pair, list) else asset_pair
-                display = asset_pair[1] if isinstance(asset_pair, list) and len(asset_pair) > 1 else name
-                payout_info = payouts.get(display, {}).get("profit", {}).get("1M", 0)
+                payout_info = payouts.get(name, {}).get("profit", {}).get("1M", 0)
 
-                asset_status = await client.get_available_asset(name, force_open=True)
+                asset_status = await client.get_available_asset(name, force_open=False)
                 is_open = asset_status[1][2] if isinstance(asset_status, tuple) and isinstance(asset_status[1], tuple) else False
 
                 print(f"🔎 Checking {name} | Open: {is_open} | 1M Payout: {payout_info}")
-
                 if is_open and int(payout_info) >= min_payout:
                     valid_assets.append(name)
 
             except Exception as e:
-                print(f"[ERROR] Asset filter issue for {asset_pair}: {e}")
+                print(f"[ERROR] Asset filter issue for {name}: {e}")
                 continue
 
     except Exception as e:
         print(f"[ERROR] Filtering assets: {e}")
+
     print(f"✅ Valid assets after filter: {valid_assets}")
     return valid_assets
 
@@ -81,16 +80,20 @@ async def fetch_and_feed():
         email=os.getenv("QX_EMAIL"),
         password=os.getenv("QX_PASSWORD")
     )
-    await client.connect()
+    success, message = await client.connect()
+    print(f"🔌 Quotex connection: {success} | Message: {message}")
+    if not success:
+        raise RuntimeError("❌ Failed to connect to Quotex: " + message)
+
     await client.change_account("demo")
-    print("✅ Connected to Quotex")
+    print("✅ Switched to demo account.")
 
     # 🔁 Refresh valid assets every 60 seconds
     async def refresh_assets():
         global assets_to_track
         while True:
             assets_to_track = await filter_available_assets(client, min_payout=70)
-          #  print(f"🔁 Refreshed valid assets: {len(assets_to_track)}")
+            print(f"🔁 Refreshed valid assets: {assets_to_track}")
             await asyncio.sleep(60)
 
     asyncio.create_task(refresh_assets())
@@ -105,7 +108,9 @@ async def fetch_and_feed():
         for asset in assets_to_track:
             try:
                 print(f"⏳ Fetching candles for {asset}...")
-                candles_raw = await client.get_candles(asset, 1, 15, 60)  # Fetch 15 candles
+                now = time.time()
+                candles_raw = await client.get_candles(asset, now, 900, 60)  # 900 = 15m back
+
                 if candles_raw:
                     for candle in candles_raw:
                         append_candle(asset, {
@@ -113,13 +118,14 @@ async def fetch_and_feed():
                             "high": float(candle["high"]),
                             "low": float(candle["low"]),
                             "close": float(candle["close"]),
-                            "time": time.time()
+                            "time": candle.get("from", time.time())
                         })
                     print(f"✅ Saved {len(candles_raw)} candles for {asset}")
                 else:
-                 pass  # previously: print(f"⚠️ No candles returned for {asset}")
+                    print(f"⚠️ No candles returned for {asset}")
+
             except Exception as e:
-             pass  # muted fetch error
+                print(f"[ERROR] Failed fetching candles for {asset}: {e}")
         await asyncio.sleep(1)
 
 @app.on_event("startup")
