@@ -1,9 +1,3 @@
-# ==============================
-# 🔇 Disable noisy logs (OPTIONAL)
-# ==============================
-# import logging
-# logging.getLogger().setLevel(logging.CRITICAL)
-
 import asyncio
 import time
 import os
@@ -11,23 +5,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pyquotex.stable_api import Quotex
-from dotenv import load_dotenv
 
-# ==============================
-# 🌍 Load Environment Variables
-# ==============================
-load_dotenv("session.env")  # not used on Render, but useful for local
-
-# ==============================
-# 📦 Storage
-# ==============================
+# 🔧 Storage
 candles = {}
 assets_to_track = []
 client = None
 
-# ==============================
-# 🕯 Candle Storage
-# ==============================
 def append_candle(symbol, candle):
     if symbol not in candles:
         candles[symbol] = []
@@ -37,9 +20,7 @@ def append_candle(symbol, candle):
 def get_candles(symbol):
     return candles.get(symbol, [])
 
-# ==============================
-# 🚀 FastAPI Setup
-# ==============================
+# 🚀 FastAPI setup
 app = FastAPI()
 
 app.add_middleware(
@@ -57,9 +38,7 @@ def get_candle_data(symbol: str):
 def tracked_assets():
     return JSONResponse(content=assets_to_track)
 
-# ==============================
-# ✅ Asset Filtering
-# ==============================
+# ✅ Asset Filter
 async def filter_available_assets(client, min_payout=70):
     print("🔍 Filtering available assets...")
     valid_assets = []
@@ -94,9 +73,7 @@ async def filter_available_assets(client, min_payout=70):
     print(f"✅ Valid assets: {valid_assets}")
     return valid_assets
 
-# ==============================
-# 🔁 Stream Candle Handler
-# ==============================
+# ✅ Candle Handler
 def handle_stream_candle(data):
     try:
         asset = data.get("active")
@@ -112,9 +89,7 @@ def handle_stream_candle(data):
     except Exception as e:
         print(f"❌ Error processing streamed candle: {e}")
 
-# ==============================
-# 🎯 Main Candle Streamer
-# ==============================
+# ✅ Main Stream Task
 async def stream_candles():
     global client, assets_to_track
 
@@ -125,11 +100,10 @@ async def stream_candles():
     print("🔐 Password present:", bool(password))
 
     if not email or not password:
-        print("❌ Missing email or password in env variables")
+        print("❌ Missing email or password")
         return
 
     client = Quotex(email=email, password=password)
-
     connected, msg = await client.connect()
     print(f"🔌 Connected: {connected} | Message: {msg}")
     await client.change_account("demo")
@@ -163,10 +137,8 @@ async def stream_candles():
 
         await asyncio.sleep(60)
 
-# ==============================
-# 🚀 Startup Event
-# ==============================
+# ✅ Startup
 @app.on_event("startup")
 async def on_startup():
-    print("🚀 Launching candle streaming task...")
+    print("🚀 Launching candle streamer...")
     asyncio.create_task(stream_candles())
