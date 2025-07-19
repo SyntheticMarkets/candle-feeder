@@ -1,5 +1,8 @@
-import logging
-logging.getLogger().setLevel(logging.CRITICAL)
+# ==============================
+# 🔇 Disable noisy logs (OPTIONAL)
+# ==============================
+# import logging
+# logging.getLogger().setLevel(logging.CRITICAL)
 
 import asyncio
 import time
@@ -8,13 +11,23 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pyquotex.stable_api import Quotex
+from dotenv import load_dotenv
 
-# 🔧 Storage
+# ==============================
+# 🌍 Load Environment Variables
+# ==============================
+load_dotenv("session.env")  # not used on Render, but useful for local
+
+# ==============================
+# 📦 Storage
+# ==============================
 candles = {}
 assets_to_track = []
 client = None
 
-# ⏺ Store new candles per asset
+# ==============================
+# 🕯 Candle Storage
+# ==============================
 def append_candle(symbol, candle):
     if symbol not in candles:
         candles[symbol] = []
@@ -24,7 +37,9 @@ def append_candle(symbol, candle):
 def get_candles(symbol):
     return candles.get(symbol, [])
 
-# 🚀 FastAPI setup
+# ==============================
+# 🚀 FastAPI Setup
+# ==============================
 app = FastAPI()
 
 app.add_middleware(
@@ -42,8 +57,11 @@ def get_candle_data(symbol: str):
 def tracked_assets():
     return JSONResponse(content=assets_to_track)
 
-# ✅ Asset Filter
+# ==============================
+# ✅ Asset Filtering
+# ==============================
 async def filter_available_assets(client, min_payout=70):
+    print("🔍 Filtering available assets...")
     valid_assets = []
 
     for _ in range(5):
@@ -51,9 +69,11 @@ async def filter_available_assets(client, min_payout=70):
         payouts = client.get_payment()
         if asset_names and payouts:
             break
+        print("⏳ Waiting for asset names and payouts...")
         await asyncio.sleep(1)
 
     if not asset_names or not payouts:
+        print("❌ Failed to load asset names or payouts")
         return []
 
     for asset_pair in asset_names:
@@ -67,12 +87,16 @@ async def filter_available_assets(client, min_payout=70):
 
             if is_open and int(payout_info) >= min_payout:
                 valid_assets.append(name)
-        except:
+        except Exception as e:
+            print(f"⚠️ Skipping asset {asset_pair} due to error: {e}")
             continue
 
+    print(f"✅ Valid assets: {valid_assets}")
     return valid_assets
 
-# ✅ Candle Handler (stream callback)
+# ==============================
+# 🔁 Stream Candle Handler
+# ==============================
 def handle_stream_candle(data):
     try:
         asset = data.get("active")
@@ -88,23 +112,34 @@ def handle_stream_candle(data):
     except Exception as e:
         print(f"❌ Error processing streamed candle: {e}")
 
-# ✅ Main Streaming Bot
+# ==============================
+# 🎯 Main Candle Streamer
+# ==============================
 async def stream_candles():
     global client, assets_to_track
 
-    client = Quotex(
-        email=os.getenv("QX_EMAIL"),
-        password=os.getenv("QX_PASSWORD")
-    )
-    await client.connect()
+    email = os.getenv("QX_EMAIL")
+    password = os.getenv("QX_PASSWORD")
+
+    print("📩 Email:", email)
+    print("🔐 Password present:", bool(password))
+
+    if not email or not password:
+        print("❌ Missing email or password in env variables")
+        return
+
+    client = Quotex(email=email, password=password)
+
+    connected, msg = await client.connect()
+    print(f"🔌 Connected: {connected} | Message: {msg}")
     await client.change_account("demo")
+
     print("✅ Connected to Quotex WebSocket")
 
     while True:
         new_assets = await filter_available_assets(client, min_payout=70)
 
         if new_assets:
-            # Unfollow/stop old ones
             for asset in assets_to_track:
                 try:
                     client.unsubscribe_realtime_candle(asset)
@@ -115,17 +150,23 @@ async def stream_candles():
             assets_to_track.clear()
             assets_to_track.extend(new_assets)
 
-            # Start new streams
             for asset in assets_to_track:
                 try:
                     client.start_candles_stream(asset, 60)
                     client.follow_candle(asset, handle_stream_candle)
+                    print(f"📡 Subscribed to {asset}")
                 except Exception as e:
-                    print(f"❌ Error subscribing to {asset}: {e}")
+                    print(f"❌ Failed to subscribe to {asset}: {e}")
                     continue
+        else:
+            print("⚠️ No valid assets found")
 
-        await asyncio.sleep(60)  # Refresh assets every 1 minute
+        await asyncio.sleep(60)
 
+# ==============================
+# 🚀 Startup Event
+# ==============================
 @app.on_event("startup")
 async def on_startup():
+    print("🚀 Launching candle streaming task...")
     asyncio.create_task(stream_candles())
