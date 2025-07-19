@@ -3,13 +3,13 @@ import asyncio
 import logging
 import builtins
 import inspect
-import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi import Request
 from contextlib import asynccontextmanager
-
+import os
+#from pyquotex.config import credentials
 from pyquotex.stable_api import Quotex
 from pyquotex.utils.processor import process_candles
 
@@ -110,11 +110,6 @@ async def bot_loop(client):
 async def lifespan(app: FastAPI):
     email = os.getenv("QX_EMAIL")
     password = os.getenv("QX_PASSWORD")
-    if not email or not password:
-        log("❌ Missing QX_EMAIL or QX_PASSWORD environment variable.")
-        yield
-        return
-
     client = Quotex(email=email, password=password, lang="en")
     log("🔐 Connecting to Quotex...")
     check, msg = await client.connect()
@@ -126,6 +121,7 @@ async def lifespan(app: FastAPI):
     app.state.bot_task = asyncio.create_task(bot_loop(client))
     yield
     await client.close()
+
 
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(
