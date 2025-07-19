@@ -1,5 +1,5 @@
 import logging
-logging.getLogger().setLevel(logging.CRITICAL)  # 🔇 Disable all logging
+logging.getLogger().setLevel(logging.CRITICAL)
 
 import asyncio
 import time
@@ -9,9 +9,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pyquotex.stable_api import Quotex
 import builtins
-builtins.print = lambda *args, **kwargs: None  # Optional mute
+builtins.print = lambda *args, **kwargs: None
 
-# ========== Candle Storage ==========
 candles = {}
 assets_to_track = []
 client = None
@@ -20,12 +19,11 @@ def append_candle(symbol, candle):
     if symbol not in candles:
         candles[symbol] = []
     candles[symbol].append(candle)
-    candles[symbol] = candles[symbol][-100:]  # Keep last 100
+    candles[symbol] = candles[symbol][-100:]
 
 def get_candles(symbol):
     return candles.get(symbol, [])
 
-# ========== FastAPI Setup ==========
 app = FastAPI()
 
 app.add_middleware(
@@ -37,13 +35,14 @@ app.add_middleware(
 
 @app.get("/candles/{symbol}")
 def get_candle_data(symbol: str):
-    return JSONResponse(content=get_candles(symbol))
+    result = get_candles(symbol)
+    return JSONResponse(content=result)
 
 @app.get("/tracked-assets")
 def tracked_assets():
     return JSONResponse(content=assets_to_track)
 
-# ========== Asset Filtering ==========
+# ✅ Filter only open instruments with 70%+ payout
 async def filter_available_assets(client, min_payout=70):
     valid_assets = []
     try:
@@ -67,7 +66,7 @@ async def filter_available_assets(client, min_payout=70):
         pass
     return valid_assets
 
-# ========== Candle Handler ==========
+# ✅ Candle handler for WebSocket stream
 async def on_candle_update(data):
     asset = data.get("active")
     if not asset:
@@ -80,32 +79,7 @@ async def on_candle_update(data):
         "time": time.time()
     })
 
-# ========== Subscribe and Feed Candles ==========
-async def subscribe_assets(asset_list):
-    for asset in asset_list:
-        try:
-            await client.candles_unsubscribe(asset)
-        except:
-            pass
-        try:
-            await client.candles_subscribe(asset, 60)  # 1-minute
-            client.candle_observe(asset, on_candle_update)
-
-            # Preload last 15 candles on startup
-            history = await client.get_candles(asset, 1, 15, 60)
-            if history:
-                for c in history:
-                    append_candle(asset, {
-                        "open": float(c["open"]),
-                        "high": float(c["high"]),
-                        "low": float(c["low"]),
-                        "close": float(c["close"]),
-                        "time": time.time()
-                    })
-        except:
-            continue
-
-# ========== Main Feeder ==========
+# ✅ Main background fetch logic
 async def fetch_and_feed():
     global client, assets_to_track
 
@@ -117,21 +91,45 @@ async def fetch_and_feed():
     await client.change_account("demo")
     print("✅ Connected to Quotex")
 
-    # Wait for new 1-minute candle start by syncing with time
-    def seconds_to_next_minute():
-        return 60 - (int(time.time()) % 60)
+    # 🔁 Refresh valid assets and resubscribe every 60s
+    async def refresh_assets():
+        global assets_to_track
+        while True:
+            new_assets = await filter_available_assets(client, min_payout=70)
 
-    while True:
-        print("🔄 Refreshing asset list + subscriptions...")
-        new_assets = await filter_available_assets(client, min_payout=70)
-        if new_assets:
-            assets_to_track.clear()
-            assets_to_track.extend(new_assets)
-            await subscribe_assets(assets_to_track)
+            # Only resubscribe if asset list changed
+            if set(new_assets) != set(assets_to_track):
+                for asset in assets_to_track:
+                    try:
+                        await client.candles_unsubscribe(asset)
+                    except:
+                        pass
 
-        await asyncio.sleep(seconds_to_next_minute())
+                assets_to_track = new_assets
 
-# ========== Startup ==========
+                for asset in assets_to_track:
+                    try:
+                        await client.candles_subscribe(asset, 60)
+                        client.candle_observe(asset, on_candle_update)
+
+                        # Preload last 15 candles on fresh subscription
+                        candles_raw = await client.get_candles(asset, 1, 15, 60)
+                        if candles_raw:
+                            for candle in candles_raw:
+                                append_candle(asset, {
+                                    "open": float(candle["open"]),
+                                    "high": float(candle["high"]),
+                                    "low": float(candle["low"]),
+                                    "close": float(candle["close"]),
+                                    "time": time.time()
+                                })
+                    except:
+                        continue
+
+            await asyncio.sleep(60)
+
+    asyncio.create_task(refresh_assets())
+
 @app.on_event("startup")
 async def on_startup():
     asyncio.create_task(fetch_and_feed())
