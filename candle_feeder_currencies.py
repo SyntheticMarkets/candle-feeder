@@ -101,22 +101,8 @@ async def bot_loop(client):
             log(f"✅ Refreshed tracked assets: {assets_store['track']}")
             await asyncio.sleep(1)
         await asyncio.sleep(0.5)
-
-# === SAFE LOGIN + START ===
-async def start_bot():
-    await asyncio.sleep(3)  # ✅ Give network stack time to settle (especially on Render)
-    email = os.getenv("QX_EMAIL")
-    password = os.getenv("QX_PASSWORD")
-    client = Quotex(email=email, password=password, lang="en")
-    log("🔐 Connecting to Quotex...")
-    check, msg = await client.connect()
-    log(f"🔌 Login success: {check} | {msg}")
-    if not check:
-        log("❌ Login failed. Bot will not start.")
-        return
-    await client.change_account("demo")
-    asyncio.create_task(bot_loop(client))
-
+        
+        
 # === FASTAPI APP ===
 app = FastAPI()
 app.add_middleware(
@@ -125,6 +111,19 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# === SAFE LOGIN + START ===
+async def start_bot():
+    await asyncio.sleep(3)  # ✅ Give network stack time to settle (especially on Render)
+    client = Quotex(
+    email = os.getenv("QX_EMAIL")
+    password = os.getenv("QX_PASSWORD")
+    )
+    await client.connect()
+    await client.change_account("demo")
+    print("✅ Connected to Quotex")
+
+
 
 @app.on_event("startup")
 async def startup_event():
