@@ -1,5 +1,5 @@
 import logging
-logging.getLogger().setLevel(logging.CRITICAL)  # 🔇 Disable all logging output from libraries
+#logging.getLogger().setLevel(logging.CRITICAL)  # 🔇 Disable all logging output from libraries
 
 import asyncio
 import time
@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pyquotex.stable_api import Quotex
 import builtins
-builtins.print = lambda *args, **kwargs: None
+#builtins.print = lambda *args, **kwargs: None
 
 
 candles = {}
