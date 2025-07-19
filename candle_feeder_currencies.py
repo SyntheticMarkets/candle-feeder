@@ -1,109 +1,25 @@
-import time
 import asyncio
-import logging
-import builtins
-import inspect
+import time
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-import os
 from pyquotex.stable_api import Quotex
-from pyquotex.utils.processor import process_candles
 
-# === LOGGING / PRINT SETUP ===
-original_print = builtins.print
-def smart_print(*args, **kwargs):
-    frame = inspect.currentframe().f_back
-    filename = frame.f_globals.get("__file__", "")
-    if "monitoring_assets.py" in filename:
-        original_print(*args, **kwargs)
-builtins.print = smart_print
-logging.basicConfig(level=logging.CRITICAL + 1)
-def log(*args, **kwargs):
-    original_print(*args, **kwargs)
+candles = {}
+assets_to_track = []
 
-# === GLOBAL STORES ===
-candles_memory = {}
-assets_store = {"track": []}
+def append_candle(symbol, candle):
+    if symbol not in candles:
+        candles[symbol] = []
+    candles[symbol].append(candle)
+    candles[symbol] = candles[symbol][-100:]  # Keep last 100 candles only
 
-# === ASSETS ===
-TARGET_OTC_ASSETS = [
-    "USDINR_otc", "AUDUSD_otc", "EURCAD_otc", "EURUSD_otc", "USDDZD_otc",
-    "USDARS_otc", "AUDJPY_otc", "EURJPY_otc", "GBPAUD_otc", "USDCHF_otc",
-    "EURGBP_otc", "USDPHP_otc", "USDEGP_otc", "GBPUSD_otc", "NZDCHF_otc",
-    "NZDJPY_otc", "USDJPY_otc", "AUDCAD_otc", "GBPNZD_otc", "EURNZD_otc",
-    "GBPJPY_otc", "CHFJPY_otc", "USDTRY_otc", "USDBDT_otc", "USDCOP_otc",
-    "AUDCHF_otc", "NZDCAD_otc", "USDCAD_otc", "USDIDR_otc", "USDNGN_otc",
-    "CADCHF_otc", "USDMXN_otc", "BRLUSD_otc", "EURAUD_otc", "USDPKR_otc",
-    "CADJPY_otc", "NZDUSD_otc", "USDZAR_otc", "AUDNZD_otc", "GBPCAD_otc",
-    "GBPCHF_otc", "EURSGD_otc"
-]
+def get_candles(symbol):
+    return candles.get(symbol, [])
 
-# === CANDLE UTILS ===
-async def update_latest_candle(client, asset, lock):
-    async with lock:
-        now = time.time()
-        candles = await client.get_candles(asset, now, 60, 60)
-        if candles and not candles[0].get("open"):
-            candles = process_candles(candles, 60)
-        if candles:
-            candles_memory.setdefault(asset, []).append(candles[-1])
-            candles_memory[asset] = candles_memory[asset][-15:]
-
-async def load_initial_candles(client, asset, lock):
-    async with lock:
-        now = time.time()
-        candles = await client.get_candles(asset, now, 900, 60)
-        if candles and not candles[0].get("open"):
-            candles = process_candles(candles, 60)
-        if candles:
-            candles_memory[asset] = candles[-15:]
-            log(f"📊 {asset} — Initialized with 15 candles")
-
-async def filter_assets_by_payout(client):
-    all_assets = client.get_all_asset_name()
-    payouts = client.get_payment()
-    result = []
-    for asset in TARGET_OTC_ASSETS:
-        try:
-            display = next((a[1] for a in all_assets if a[0] == asset), None)
-            if not display:
-                continue
-            payout = payouts.get(display, {}).get("profit", {}).get("1M", 0)
-            if int(payout) == 93:
-                result.append(asset)
-        except Exception as e:
-            log(f"[ERROR] filtering {asset}: {e}")
-    log(f"✅ Filtered OTC 93% assets: {len(result)}")
-    return result
-
-# === MAIN BOT LOOP ===
-async def bot_loop(client):
-    lock = asyncio.Lock()
-    valid_assets = await filter_assets_by_payout(client)
-    await asyncio.gather(*(load_initial_candles(client, a, lock) for a in valid_assets))
-    assets_store["track"] = valid_assets
-    log(f"✅ Tracked assets now ready: {assets_store['track']}")
-
-    while True:
-        now = time.localtime()
-        if now.tm_sec == 0:
-            log("🕛 00:00 — updating candles")
-            start = time.time()
-            await asyncio.gather(*(update_latest_candle(client, a, lock) for a in valid_assets))
-            log(f"✅ Updated all with latest candle in {round(time.time()-start, 2)}s")
-            await asyncio.sleep(1)
-        elif now.tm_sec == 10:
-            log("🔄 00:10 — refreshing assets")
-            valid_assets = await filter_assets_by_payout(client)
-            await asyncio.gather(*(load_initial_candles(client, a, lock) for a in valid_assets))
-            assets_store["track"] = valid_assets
-            log(f"✅ Refreshed tracked assets: {assets_store['track']}")
-            await asyncio.sleep(1)
-        await asyncio.sleep(0.5)
-
-# === FASTAPI SETUP ===
 app = FastAPI()
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -111,8 +27,50 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.on_event("startup")
-async def startup_event():
+@app.get("/candles/{symbol}")
+def get_candle_data(symbol: str):
+    result = get_candles(symbol)
+    print(f"📤 Served {symbol} candles: {len(result)}")
+    return JSONResponse(content=result)
+
+@app.get("/tracked-assets")
+def tracked_assets():
+    return JSONResponse(content=assets_to_track)
+
+# ✅ Filter only open instruments with 70%+ payout
+async def filter_available_assets(client, min_payout=70):
+    valid_assets = []
+    try:
+        asset_names = client.get_all_asset_name()
+        payouts = client.get_payment()
+
+        for asset_pair in asset_names:
+            try:
+                name = asset_pair[0] if isinstance(asset_pair, list) else asset_pair
+                display = asset_pair[1] if isinstance(asset_pair, list) and len(asset_pair) > 1 else name
+                payout_info = payouts.get(display, {}).get("profit", {}).get("1M", 0)
+
+                asset_status = await client.get_available_asset(name, force_open=True)
+                is_open = asset_status[1][2] if isinstance(asset_status, tuple) and isinstance(asset_status[1], tuple) else False
+
+                print(f"🔎 Checking {name} | Open: {is_open} | 1M Payout: {payout_info}")
+
+                if is_open and int(payout_info) >= min_payout:
+                    valid_assets.append(name)
+
+            except Exception as e:
+                print(f"[ERROR] Asset filter issue for {asset_pair}: {e}")
+                continue
+
+    except Exception as e:
+        print(f"[ERROR] Filtering assets: {e}")
+    print(f"✅ Valid assets after filter: {valid_assets}")
+    return valid_assets
+
+# ✅ Background fetch logic
+async def fetch_and_feed():
+    global assets_to_track
+
     client = Quotex(
         email=os.getenv("QX_EMAIL"),
         password=os.getenv("QX_PASSWORD")
@@ -120,19 +78,44 @@ async def startup_event():
     await client.connect()
     await client.change_account("demo")
     print("✅ Connected to Quotex")
-    asyncio.create_task(bot_loop(client))
 
-@app.get("/candles/{symbol}")
-def get_candle(symbol: str):
-    return JSONResponse(content=candles_memory.get(symbol, []))
+    # 🔁 Refresh valid assets every 60 seconds
+    async def refresh_assets():
+        global assets_to_track
+        while True:
+            assets_to_track = await filter_available_assets(client, min_payout=70)
+            print(f"🔁 Refreshed valid assets: {len(assets_to_track)}")
+            await asyncio.sleep(60)
 
-@app.get("/tracked-assets/currencies")
-def get_assets():
-    tracked = assets_store["track"]
-    log(f"📡 Reporting {len(tracked)} tracked assets: {tracked}")
-    return JSONResponse(content=tracked)
+    asyncio.create_task(refresh_assets())
 
-# === ENTRY POINT ===
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # ⏳ Wait until valid assets are available
+    while not assets_to_track:
+        print("⏳ Waiting for valid assets to track...")
+        await asyncio.sleep(1)
+
+    # 🔄 Candle fetching
+    while True:
+        for asset in assets_to_track:
+            try:
+                print(f"⏳ Fetching candles for {asset}...")
+                candles_raw = await client.get_candles(asset, 1, 15, 60)  # Fetch 15 candles
+                if candles_raw:
+                    for candle in candles_raw:
+                        append_candle(asset, {
+                            "open": float(candle["open"]),
+                            "high": float(candle["high"]),
+                            "low": float(candle["low"]),
+                            "close": float(candle["close"]),
+                            "time": time.time()
+                        })
+                    print(f"✅ Saved {len(candles_raw)} candles for {asset}")
+                else:
+                    print(f"⚠️ No candles returned for {asset}")
+            except Exception as e:
+                print(f"[ERROR] Candle fetch failed for {asset}: {e}")
+        await asyncio.sleep(1)
+
+@app.on_event("startup")
+async def on_startup():
+    asyncio.create_task(fetch_and_feed())
