@@ -113,14 +113,23 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_event():
-    client = Quotex(
-        email=os.getenv("QX_EMAIL"),
-        password=os.getenv("QX_PASSWORD")
-    )
-    await client.connect()  # ✅ Use the .api.connect() instead
-    await client.change_account("demo")
-    print("✅ Connected to Quotex")
-    asyncio.create_task(bot_loop(client))
+    retries = 5
+    for i in range(retries):
+        try:
+            client = Quotex(
+                email=os.getenv("QX_EMAIL"),
+                password=os.getenv("QX_PASSWORD")
+            )
+            await client.connect()  # ✅ safe wrapped connect
+            await client.change_account("demo")
+            log(f"✅ Connected to Quotex on attempt {i+1}")
+            asyncio.create_task(bot_loop(client))
+            return
+        except Exception as e:
+            log(f"❌ Login attempt {i+1} failed: {e}")
+            await asyncio.sleep(2)
+    log("🚫 All login attempts failed. Candle feeder not started.")
+
 
 
 @app.get("/candles/{symbol}")
