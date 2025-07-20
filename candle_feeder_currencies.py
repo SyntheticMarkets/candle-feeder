@@ -117,11 +117,9 @@ async def startup_event():
         email=os.getenv("QX_EMAIL"),
         password=os.getenv("QX_PASSWORD")
     )
-    status, reason = await client.api.connect(client.account_is_demo)
-    if not status:
-        print(f"❌ Login failed: {reason}")
-        return
-    print("✅ Login successful")
+    await client.api.connect()  # ✅ Use the .api.connect() instead
+    await client.change_account("demo")
+    print("✅ Connected to Quotex")
     asyncio.create_task(bot_loop(client))
 
 
