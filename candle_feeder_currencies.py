@@ -10,23 +10,24 @@ import os
 from pyquotex.stable_api import Quotex
 from pyquotex.utils.processor import process_candles
 
-# === LOGGING / PRINT SETUP ===
+# === Suppress external prints ===
 original_print = builtins.print
 def smart_print(*args, **kwargs):
     frame = inspect.currentframe().f_back
     filename = frame.f_globals.get("__file__", "")
-    if "monitoring_assets.py" in filename:
+    if "candle_feeder" in filename:
         original_print(*args, **kwargs)
 builtins.print = smart_print
 logging.basicConfig(level=logging.CRITICAL + 1)
+
 def log(*args, **kwargs):
     original_print(*args, **kwargs)
 
-# === GLOBAL STORES ===
+# === Memory ===
 candles_memory = {}
 assets_store = {"track": []}
 
-# === ASSETS ===
+# === OTC Currencies Only ===
 TARGET_OTC_ASSETS = [
     "USDINR_otc", "AUDUSD_otc", "EURCAD_otc", "EURUSD_otc", "USDDZD_otc",
     "USDARS_otc", "AUDJPY_otc", "EURJPY_otc", "GBPAUD_otc", "USDCHF_otc",
@@ -34,32 +35,12 @@ TARGET_OTC_ASSETS = [
     "NZDJPY_otc", "USDJPY_otc", "AUDCAD_otc", "GBPNZD_otc", "EURNZD_otc",
     "GBPJPY_otc", "CHFJPY_otc", "USDTRY_otc", "USDBDT_otc", "USDCOP_otc",
     "AUDCHF_otc", "NZDCAD_otc", "USDCAD_otc", "USDIDR_otc", "USDNGN_otc",
-    "CADCHF_otc", "USDMXN_otc", "BRLUSD_otc", "EURAUD_otc", "USDPKR_otc",
+    "CADCHF_otc", "USDMXN_otc", "USDBRL_otc", "EURAUD_otc", "USDPKR_otc",
     "CADJPY_otc", "NZDUSD_otc", "USDZAR_otc", "AUDNZD_otc", "GBPCAD_otc",
-    "GBPCHF_otc", "EURSGD_otc"
+    "GBPCHF_otc", "EURSGD_otc", "EURCHF_otc"
 ]
 
-# === CANDLE UTILS ===
-async def update_latest_candle(client, asset, lock):
-    async with lock:
-        now = time.time()
-        candles = await client.get_candles(asset, now, 60, 60)
-        if candles and not candles[0].get("open"):
-            candles = process_candles(candles, 60)
-        if candles:
-            candles_memory.setdefault(asset, []).append(candles[-1])
-            candles_memory[asset] = candles_memory[asset][-15:]
-
-async def load_initial_candles(client, asset, lock):
-    async with lock:
-        now = time.time()
-        candles = await client.get_candles(asset, now, 900, 60)
-        if candles and not candles[0].get("open"):
-            candles = process_candles(candles, 60)
-        if candles:
-            candles_memory[asset] = candles[-15:]
-            log(f"📊 {asset} — Initialized with 15 candles")
-
+# === Payout Filter ===
 async def filter_assets_by_payout(client):
     all_assets = client.get_all_asset_name()
     payouts = client.get_payment()
@@ -77,9 +58,35 @@ async def filter_assets_by_payout(client):
     log(f"✅ Filtered OTC 93% assets: {len(result)}")
     return result
 
-# === MAIN BOT LOOP ===
+# === Initial Load ===
+async def load_initial_candles(client, asset, lock):
+    async with lock:
+        now = time.time()
+        candles = await client.get_candles(asset, now, 900, 60)
+        if candles and not candles[0].get("open"):
+            candles = process_candles(candles, 60)
+        if candles:
+            candles_memory[asset] = candles[-15:]
+            log(f"📊 {asset} — Initialized with 15 candles")
+
+# === Update Last Candle ===
+async def update_latest_candle(client, asset, lock):
+    async with lock:
+        now = time.time()
+        candles = await client.get_candles(asset, now, 60, 60)
+        if candles and not candles[0].get("open"):
+            candles = process_candles(candles, 60)
+        if candles:
+            candles_memory.setdefault(asset, []).append(candles[-1])
+            candles_memory[asset] = candles_memory[asset][-15:]
+
+# === Main Feeder Loop ===
 async def bot_loop(client):
     lock = asyncio.Lock()
+    
+    candles_memory.clear()
+    assets_store["track"].clear()
+    
     valid_assets = await filter_assets_by_payout(client)
     await asyncio.gather(*(load_initial_candles(client, a, lock) for a in valid_assets))
     assets_store["track"] = valid_assets
@@ -90,9 +97,16 @@ async def bot_loop(client):
         if now.tm_sec == 0:
             log("🕛 00:00 — updating candles")
             start = time.time()
-            await asyncio.gather(*(update_latest_candle(client, a, lock) for a in valid_assets))
+            await asyncio.gather(*(update_latest_candle(client, a, lock) for a in assets_store["track"]))
             log(f"✅ Updated all with latest candle in {round(time.time()-start, 2)}s")
             await asyncio.sleep(1)
+            
+        elif now.tm_sec == 9:
+            log("🧹 00:09 — clearing memory before refresh")
+            candles_memory.clear()
+            assets_store["track"].clear()
+            await asyncio.sleep(1)
+    
         elif now.tm_sec == 10:
             log("🔄 00:10 — refreshing assets")
             valid_assets = await filter_assets_by_payout(client)
@@ -102,7 +116,7 @@ async def bot_loop(client):
             await asyncio.sleep(1)
         await asyncio.sleep(0.5)
 
-# === FASTAPI SETUP ===
+# === FastAPI ===
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
@@ -120,7 +134,7 @@ async def startup_event():
                 email=os.getenv("QX_EMAIL"),
                 password=os.getenv("QX_PASSWORD")
             )
-            await client.connect()  # ✅ safe wrapped connect
+            await client.connect()
             await client.change_account("demo")
             log(f"✅ Connected to Quotex on attempt {i+1}")
             asyncio.create_task(bot_loop(client))
@@ -128,9 +142,7 @@ async def startup_event():
         except Exception as e:
             log(f"❌ Login attempt {i+1} failed: {e}")
             await asyncio.sleep(2)
-    log("🚫 All login attempts failed. Candle feeder not started.")
-
-
+    log("🚫 All login attempts failed.")
 
 @app.get("/candles/{symbol}")
 def get_candle(symbol: str):
@@ -142,7 +154,7 @@ def get_assets():
     log(f"📡 Reporting {len(tracked)} tracked assets: {tracked}")
     return JSONResponse(content=tracked)
 
-# === ENTRY POINT ===
+# === Run on Port 8011 ===
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8011)
